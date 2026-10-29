@@ -1,0 +1,8 @@
+node_modules
+dist
+coverage
+artifacts
+.git
+.env
+*.log
+Assignment*.pdf
