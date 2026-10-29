@@ -1,0 +1,239 @@
+name: ds-banking
+
+x-app: &app
+  image: ds-banking:local
+  build:
+    context: ..
+    dockerfile: Dockerfile
+  restart: "no"
+  environment:
+    INTERNAL_TOKEN: ${INTERNAL_TOKEN:-dev-internal-token}
+    LOG_LEVEL: ${LOG_LEVEL:-info}
+
+x-postgres: &postgres
+  image: postgres:17-alpine
+  restart: "no"
+  environment:
+    POSTGRES_USER: banking
+    POSTGRES_PASSWORD: banking
+    POSTGRES_DB: banking
+  command:
+    - postgres
+    - -c
+    - max_prepared_transactions=200
+    - -c
+    - synchronous_commit=on
+    - -c
+    - max_connections=200
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -U banking -d banking"]
+    interval: 2s
+    timeout: 3s
+    retries: 30
+
+services:
+  coordinator-db:
+    <<: *postgres
+    volumes:
+      - coordinator-data:/var/lib/postgresql/data
+    networks: [coord]
+
+  shard-a-db:
+    <<: *postgres
+    volumes:
+      - shard-a-data:/var/lib/postgresql/data
+    networks: [shard-a]
+
+  shard-b-db:
+    <<: *postgres
+    volumes:
+      - shard-b-data:/var/lib/postgresql/data
+    networks: [shard-b]
+
+  bootstrap:
+    <<: *app
+    command: ["node", "dist/apps/bootstrap/main.js"]
+    environment:
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN:-dev-internal-token}
+      SHARD_MAP_PATH: /app/config/shard-map.yaml
+      MIGRATIONS_DIR: /app/migrations
+      SHARD_A_DATABASE_URL: postgres://banking:banking@shard-a-db:5432/banking
+      SHARD_B_DATABASE_URL: postgres://banking:banking@shard-b-db:5432/banking
+      COORDINATOR_DATABASE_URL: postgres://banking:banking@coordinator-db:5432/banking
+      SEED_BALANCE: ${SEED_BALANCE:-1000}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      shard-a-db:
+        condition: service_healthy
+      shard-b-db:
+        condition: service_healthy
+      coordinator-db:
+        condition: service_healthy
+    networks: [shard-a, shard-b, coord]
+
+  shard-a-1:
+    <<: *app
+    command: ["node", "dist/apps/shard/main.js"]
+    environment:
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN:-dev-internal-token}
+      SHARD_ID: A
+      REPLICA_ID: a1
+      PORT: "8080"
+      DATABASE_URL: postgres://banking:banking@shard-a-db:5432/banking
+      SHARD_MAP_PATH: /app/config/shard-map.yaml
+      MAX_CONCURRENT_REQUESTS: ${SHARD_MAX_CONCURRENCY:-100}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks: [shard-a]
+
+  shard-a-2:
+    <<: *app
+    command: ["node", "dist/apps/shard/main.js"]
+    environment:
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN:-dev-internal-token}
+      SHARD_ID: A
+      REPLICA_ID: a2
+      PORT: "8080"
+      DATABASE_URL: postgres://banking:banking@shard-a-db:5432/banking
+      SHARD_MAP_PATH: /app/config/shard-map.yaml
+      MAX_CONCURRENT_REQUESTS: ${SHARD_MAX_CONCURRENCY:-100}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks: [shard-a]
+
+  shard-b-1:
+    <<: *app
+    command: ["node", "dist/apps/shard/main.js"]
+    environment:
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN:-dev-internal-token}
+      SHARD_ID: B
+      REPLICA_ID: b1
+      PORT: "8080"
+      DATABASE_URL: postgres://banking:banking@shard-b-db:5432/banking
+      SHARD_MAP_PATH: /app/config/shard-map.yaml
+      MAX_CONCURRENT_REQUESTS: ${SHARD_MAX_CONCURRENCY:-100}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks: [shard-b]
+
+  shard-b-2:
+    <<: *app
+    command: ["node", "dist/apps/shard/main.js"]
+    environment:
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN:-dev-internal-token}
+      SHARD_ID: B
+      REPLICA_ID: b2
+      PORT: "8080"
+      DATABASE_URL: postgres://banking:banking@shard-b-db:5432/banking
+      SHARD_MAP_PATH: /app/config/shard-map.yaml
+      MAX_CONCURRENT_REQUESTS: ${SHARD_MAX_CONCURRENCY:-100}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks: [shard-b]
+
+  coordinator:
+    <<: *app
+    command: ["node", "dist/apps/coordinator/main.js"]
+    environment:
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN:-dev-internal-token}
+      PORT: "8081"
+      DATABASE_URL: postgres://banking:banking@coordinator-db:5432/banking
+      SHARD_MAP_PATH: /app/config/shard-map.yaml
+      PREPARE_TIMEOUT_MS: ${PREPARE_TIMEOUT_MS:-5000}
+      RESOLVER_INTERVAL_MS: ${RESOLVER_INTERVAL_MS:-5000}
+      FAULTS: ${FAULTS:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8081/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks: [coord, shard-a, shard-b]
+
+  gateway:
+    <<: *app
+    command: ["node", "dist/apps/gateway/main.js"]
+    environment:
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN:-dev-internal-token}
+      PORT: "8080"
+      SHARD_MAP_PATH: /app/config/shard-map.yaml
+      COORDINATOR_URL: http://coordinator:8081
+      MAX_CONCURRENT_REQUESTS: ${GATEWAY_MAX_CONCURRENCY:-200}
+      HEALTH_INTERVAL_MS: ${HEALTH_INTERVAL_MS:-2000}
+      HEALTH_TIMEOUT_MS: ${HEALTH_TIMEOUT_MS:-500}
+      HEALTH_FAILURE_THRESHOLD: ${HEALTH_FAILURE_THRESHOLD:-3}
+      SHARD_REQUEST_TIMEOUT_MS: ${SHARD_REQUEST_TIMEOUT_MS:-5000}
+      COORDINATOR_REQUEST_TIMEOUT_MS: ${COORDINATOR_REQUEST_TIMEOUT_MS:-20000}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "8080:8080"
+    depends_on:
+      shard-a-1:
+        condition: service_healthy
+      shard-a-2:
+        condition: service_healthy
+      shard-b-1:
+        condition: service_healthy
+      shard-b-2:
+        condition: service_healthy
+      coordinator:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks: [edge, coord, shard-a, shard-b]
+
+  client:
+    <<: *app
+    profiles: ["demo"]
+    entrypoint: ["node", "dist/apps/cli/main.js"]
+    environment:
+      GATEWAY_URL: http://gateway:8080
+    depends_on:
+      gateway:
+        condition: service_healthy
+    networks: [edge]
+
+volumes:
+  shard-a-data:
+  shard-b-data:
+  coordinator-data:
+
+networks:
+  edge:
+  coord:
+  shard-a:
+  shard-b:
