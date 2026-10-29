@@ -1,0 +1,20 @@
+version: 1
+shards:
+  A:
+    ranges:
+      - from: A0001
+        to: A1000
+    replicas:
+      - id: a1
+        url: http://shard-a-1:8080
+      - id: a2
+        url: http://shard-a-2:8080
+  B:
+    ranges:
+      - from: A1001
+        to: A2000
+    replicas:
+      - id: b1
+        url: http://shard-b-1:8080
+      - id: b2
+        url: http://shard-b-2:8080
