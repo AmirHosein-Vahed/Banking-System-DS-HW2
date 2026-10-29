@@ -1,0 +1,67 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  quality:
+    name: typecheck, lint, unit tests, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+  integration:
+    name: compose smoke test and integration tests
+    runs-on: ubuntu-latest
+    needs: quality
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+
+      - name: Start the platform
+        run: docker compose -f deploy/compose.yaml up -d --build
+
+      - name: Wait for the gateway
+        run: |
+          for i in $(seq 1 90); do
+            if curl -fsS http://localhost:8080/readyz >/dev/null 2>&1; then
+              echo "gateway ready after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "gateway did not become ready"
+          docker compose -f deploy/compose.yaml ps
+          docker compose -f deploy/compose.yaml logs --no-color
+          exit 1
+
+      - name: Run integration tests
+        run: npm run test:integration
+
+      - name: Collect logs
+        if: always()
+        run: docker compose -f deploy/compose.yaml logs --no-color > compose.log || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: compose-logs
+          path: compose.log
+
+      - name: Stop the platform
+        if: always()
+        run: docker compose -f deploy/compose.yaml down -v
