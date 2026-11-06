@@ -368,6 +368,7 @@ pure TypeScript and unit-testable without a database.
 
 ## Documentation
 
+* [`report.md`](report.md) — complete technical report and design details.
 * [`docs/architecture.md`](docs/architecture.md) — components, data model,
   request flows, concurrency and durability.
 * [`docs/2pc-protocol.md`](docs/2pc-protocol.md) — protocol, journal schemas,
