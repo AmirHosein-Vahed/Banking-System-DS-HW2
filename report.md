@@ -3,7 +3,7 @@
 **Course:** Distributed Systems — Assignment 2  
 **Date:** 2026-11-06  
 **System Version:** 0.1.0  
-**Repository:** `DS-Assignment2-Banking`  
+**Repository:** `https://github.com/AmirHosein-Vahed/Banking-System-DS-HW2`  
 
 ---
 
